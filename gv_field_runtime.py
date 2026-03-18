@@ -2,10 +2,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from gv_field_coupling import apply_field_coupling
+from gv_field_coupling import (
+    apply_field_coupling,
+    average_coupling,
+    update_coupling,
+)
 from gv_field_delta import compute_field_delta
 from gv_field_invariant import check_field_invariants
-from gv_field_persistence import load_field_state, save_field_state, STATE_PATH
+from gv_field_persistence import STATE_PATH, load_field_state, save_field_state
 from gv_field_state import AXES, FieldState
 from gv_field_strain import detect_field_strain
 
@@ -36,8 +40,8 @@ def compute_effective_strain(
     constraint: dict[str, float],
 ) -> dict[str, float]:
     """
-    Strain is reduced by existing constraint.
-    This creates the measurable hardening signature across passes.
+    Existing constraint reduces future strain.
+    This creates measurable hardening across passes.
     """
     raw = detect_field_strain(input_text)
     effective: dict[str, float] = {}
@@ -61,8 +65,11 @@ def run_sequence(state: FieldState, input_text: str, passes: int = 3) -> FieldSt
 
     for i in range(1, passes + 1):
         strain = compute_effective_strain(input_text, working.constraint)
-        delta = compute_field_delta(strain)
-        delta = apply_field_coupling(delta)
+
+        working.coupling = update_coupling(working.coupling, strain)
+
+        base_delta = compute_field_delta(strain)
+        delta = apply_field_coupling(base_delta, working.coupling)
 
         if check_field_invariants(working.constraint, delta, max_constraint=10.0):
             for axis in AXES:
@@ -75,6 +82,7 @@ def run_sequence(state: FieldState, input_text: str, passes: int = 3) -> FieldSt
         constraint_total = total_value(working.constraint)
 
         print(format_pass_row(f"pass{i}", strain, delta, working.constraint))
+        print(f"         avg coupling: {average_coupling(working.coupling):.3f}")
 
         if prev_strain_total is not None:
             strain_ok = strain_total <= prev_strain_total
@@ -104,6 +112,7 @@ def run_field_demo(input_text: str, passes: int = 3, persist: bool = True) -> Fi
     has_prior_state = STATE_PATH.exists()
     prev_state = load_field_state()
     starting_constraint = deepcopy(prev_state.constraint)
+    starting_coupling_avg = average_coupling(prev_state.coupling)
 
     print("\n==============================")
     print("FRESH BASELINE (no persistence)")
@@ -114,6 +123,7 @@ def run_field_demo(input_text: str, passes: int = 3, persist: bool = True) -> Fi
     print("PERSISTED RUN")
     print("==============================")
     print("Starting persisted constraint:", starting_constraint)
+    print(f"Starting avg coupling: {starting_coupling_avg:.3f}")
 
     persisted_result = run_sequence(prev_state, input_text, passes=passes)
 
@@ -124,6 +134,7 @@ def run_field_demo(input_text: str, passes: int = 3, persist: bool = True) -> Fi
     print("Fresh result constraint:    ", fresh_result.constraint)
     print("Persisted start constraint: ", starting_constraint)
     print("Persisted end constraint:   ", persisted_result.constraint)
+    print(f"Persisted end avg coupling: {average_coupling(persisted_result.coupling):.3f}")
 
     if not has_prior_state:
         print("\n🟡 Cold start only: persistence file initialized.")
