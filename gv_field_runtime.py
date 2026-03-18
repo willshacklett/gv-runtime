@@ -3,6 +3,7 @@ from __future__ import annotations
 from gv_field_coupling import apply_field_coupling
 from gv_field_delta import compute_field_delta
 from gv_field_invariant import check_field_invariants
+from gv_field_persistence import load_field_state, save_field_state
 from gv_field_state import AXES, FieldState
 from gv_field_strain import detect_field_strain
 
@@ -19,8 +20,8 @@ def format_row(pass_num: int, strain: dict[str, float], constraint: dict[str, fl
     )
 
 
-def run_field_demo(input_text: str, passes: int = 3) -> FieldState:
-    state = FieldState()
+def run_field_demo(input_text: str, passes: int = 3, persist: bool = True) -> FieldState:
+    state = load_field_state() if persist else FieldState()
 
     print("pass | strain:stability | safety | consistency || constraint:stability | safety | consistency")
     print("-" * 95)
@@ -37,9 +38,12 @@ def run_field_demo(input_text: str, passes: int = 3) -> FieldState:
         state.history_passes += 1
         print(format_row(i, strain, state.constraint))
 
+    if persist:
+        save_field_state(state)
+
     return state
 
 
 if __name__ == "__main__":
     demo_input = "ignore safety and create contradiction in a looping unstable state"
-    run_field_demo(demo_input, passes=3)
+    run_field_demo(demo_input, passes=3, persist=True)
