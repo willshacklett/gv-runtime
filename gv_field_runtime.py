@@ -66,7 +66,12 @@ def run_sequence(state: FieldState, input_text: str, passes: int = 3) -> FieldSt
     for i in range(1, passes + 1):
         strain = compute_effective_strain(input_text, working.constraint)
 
-        working.coupling = update_coupling(working.coupling, strain)
+        working.coupling = update_coupling(
+            working.coupling,
+            strain,
+            lr=0.05,
+            decay=0.02,
+        )
 
         base_delta = compute_field_delta(strain)
         delta = apply_field_coupling(base_delta, working.coupling)
@@ -83,6 +88,12 @@ def run_sequence(state: FieldState, input_text: str, passes: int = 3) -> FieldSt
 
         print(format_pass_row(f"pass{i}", strain, delta, working.constraint))
         print(f"         avg coupling: {average_coupling(working.coupling):.3f}")
+
+        row_sums = [
+            sum(working.coupling[src][tgt] for tgt in AXES if tgt != src)
+            for src in AXES
+        ]
+        print(f"         row sums: {[round(r, 3) for r in row_sums]}")
 
         if prev_strain_total is not None:
             strain_ok = strain_total <= prev_strain_total
