@@ -1,1 +1,1 @@
-# gv-runtime
+# Constraint-Gated Real-Time Adaptation Engine
