@@ -9,25 +9,58 @@ def update_coupling(
     coupling: Dict[str, Dict[str, float]],
     strain: Dict[str, float],
     lr: float = 0.05,
-    max_weight: float = 0.50,
+    decay: float = 0.02,
+    max_weight: float = 0.5,
 ) -> Dict[str, Dict[str, float]]:
     """
-    Increase cross-axis coupling when two axes are both under strain.
-    This is a simple bounded adaptive rule.
+    Adaptive + decay + normalization-ready coupling update.
     """
-    updated: Dict[str, Dict[str, float]] = {
+    updated = {
         source: dict(targets) for source, targets in coupling.items()
     }
 
+    # --- adaptive growth ---
     for source in AXES:
         for target in AXES:
             if source == target:
                 continue
 
-            influence = strain.get(source, 0.0) * strain.get(target, 0.0)
+            influence = strain[source] * strain[target]
             delta_weight = lr * influence
-            new_weight = updated[source][target] + delta_weight
-            updated[source][target] = min(max_weight, max(0.0, new_weight))
+
+            updated[source][target] += delta_weight
+
+    # --- controlled decay ---
+    for source in AXES:
+        for target in AXES:
+            if source == target:
+                continue
+
+            updated[source][target] *= (1.0 - decay)
+
+    # --- clamp ---
+    for source in AXES:
+        for target in AXES:
+            if source == target:
+                continue
+
+            updated[source][target] = min(
+                max_weight,
+                max(0.0, updated[source][target])
+            )
+
+    # --- normalization (row-wise) ---
+    for source in AXES:
+        row_sum = sum(
+            updated[source][target]
+            for target in AXES if target != source
+        )
+
+        if row_sum > 0:
+            for target in AXES:
+                if target == source:
+                    continue
+                updated[source][target] /= row_sum
 
     return updated
 
@@ -37,20 +70,18 @@ def apply_field_coupling(
     coupling: Dict[str, Dict[str, float]],
     influence_scale: float = 0.10,
 ) -> Dict[str, float]:
-    """
-    Apply adaptive cross-axis influence to the per-axis delta.
-    """
     adjusted = dict(delta)
 
     for target in AXES:
-        cross_influence = 0.0
+        cross = 0.0
 
         for source in AXES:
             if source == target:
                 continue
-            cross_influence += coupling[source][target] * delta.get(source, 0.0)
 
-        adjusted[target] += influence_scale * cross_influence
+            cross += coupling[source][target] * delta[source]
+
+        adjusted[target] += influence_scale * cross
 
     return adjusted
 
@@ -61,9 +92,8 @@ def average_coupling(coupling: Dict[str, Dict[str, float]]) -> float:
 
     for source in AXES:
         for target in AXES:
-            if source == target:
-                continue
-            total += coupling[source][target]
-            count += 1
+            if source != target:
+                total += coupling[source][target]
+                count += 1
 
     return total / count if count else 0.0
