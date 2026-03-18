@@ -10,31 +10,87 @@ from gv_field_state import AXES, FieldState
 from gv_field_strain import detect_field_strain
 
 
-def format_row(label: str, strain: dict[str, float], constraint: dict[str, float]) -> str:
+def total_value(values: dict[str, float]) -> float:
+    return sum(values.values())
+
+
+def format_pass_row(
+    label: str,
+    strain: dict[str, float],
+    delta: dict[str, float],
+    constraint: dict[str, float],
+) -> str:
     return (
-        f"{label:<10} | "
-        f"{strain['stability']:.2f} | {strain['safety']:.2f} | {strain['consistency']:.2f} || "
-        f"{constraint['stability']:.2f} | {constraint['safety']:.2f} | {constraint['consistency']:.2f}"
+        f"{label:<7} | "
+        f"{total_value(strain):.3f} | "
+        f"{total_value(delta):.3f} | "
+        f"{total_value(constraint):.3f} || "
+        f"S[{strain['stability']:.2f},{strain['safety']:.2f},{strain['consistency']:.2f}] "
+        f"D[{delta['stability']:.2f},{delta['safety']:.2f},{delta['consistency']:.2f}] "
+        f"C[{constraint['stability']:.2f},{constraint['safety']:.2f},{constraint['consistency']:.2f}]"
     )
+
+
+def compute_effective_strain(
+    input_text: str,
+    constraint: dict[str, float],
+) -> dict[str, float]:
+    """
+    Strain is reduced by existing constraint.
+    This creates the measurable hardening signature across passes.
+    """
+    raw = detect_field_strain(input_text)
+    effective: dict[str, float] = {}
+
+    for axis in AXES:
+        hardened = raw[axis] * max(0.0, 1.0 - constraint.get(axis, 0.0))
+        effective[axis] = max(0.0, min(1.0, hardened))
+
+    return effective
 
 
 def run_sequence(state: FieldState, input_text: str, passes: int = 3) -> FieldState:
     working = deepcopy(state)
 
-    print("label      | strain(stab,safe,cons) || constraint(stab,safe,cons)")
-    print("-" * 75)
+    print("label   | strain | delta | constraint || vectors")
+    print("-" * 110)
+
+    prev_strain_total: float | None = None
+    prev_delta_total: float | None = None
+    prev_constraint_total = total_value(working.constraint)
 
     for i in range(1, passes + 1):
-        strain = detect_field_strain(input_text)
+        strain = compute_effective_strain(input_text, working.constraint)
         delta = compute_field_delta(strain)
         delta = apply_field_coupling(delta)
 
-        if check_field_invariants(working.constraint, delta):
+        if check_field_invariants(working.constraint, delta, max_constraint=10.0):
             for axis in AXES:
                 working.constraint[axis] += delta.get(axis, 0.0)
 
         working.history_passes += 1
-        print(format_row(f"pass {i}", strain, working.constraint))
+
+        strain_total = total_value(strain)
+        delta_total = total_value(delta)
+        constraint_total = total_value(working.constraint)
+
+        print(format_pass_row(f"pass{i}", strain, delta, working.constraint))
+
+        if prev_strain_total is not None:
+            strain_ok = strain_total <= prev_strain_total
+            delta_ok = delta_total <= prev_delta_total
+            constraint_ok = constraint_total >= prev_constraint_total
+
+            print(
+                f"         monotonic: "
+                f"strain {'OK' if strain_ok else 'NO'} | "
+                f"delta {'OK' if delta_ok else 'NO'} | "
+                f"constraint {'OK' if constraint_ok else 'NO'}"
+            )
+
+        prev_strain_total = strain_total
+        prev_delta_total = delta_total
+        prev_constraint_total = constraint_total
 
     return working
 
@@ -73,9 +129,9 @@ def run_field_demo(input_text: str, passes: int = 3, persist: bool = True) -> Fi
         print("\n🟡 Cold start only: persistence file initialized.")
         print("Run this script again to verify hardening survives reset.")
     else:
-        fresh_total = sum(fresh_result.constraint.values())
-        persisted_start_total = sum(starting_constraint.values())
-        persisted_end_total = sum(persisted_result.constraint.values())
+        fresh_total = total_value(fresh_result.constraint)
+        persisted_start_total = total_value(starting_constraint)
+        persisted_end_total = total_value(persisted_result.constraint)
 
         print("\nTotals:")
         print(f"Fresh result total:      {fresh_total:.3f}")
