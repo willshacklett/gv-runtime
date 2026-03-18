@@ -1,16 +1,27 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Dict
-from gv_field_coupling import initialize_coupling
 
 AXES = ["stability", "safety", "consistency"]
 
 
+def default_constraint() -> Dict[str, float]:
+    return {axis: 0.0 for axis in AXES}
+
+
+def default_coupling() -> Dict[str, Dict[str, float]]:
+    return {
+        source: {
+            target: (0.0 if source == target else 0.05)
+            for target in AXES
+        }
+        for source in AXES
+    }
+
+
 @dataclass
 class FieldState:
-    constraint: Dict[str, float] = field(
-        default_factory=lambda: {axis: 0.0 for axis in AXES}
-    )
-    coupling: Dict[str, Dict[str, float]] = field(
-        default_factory=initialize_coupling
-    )
+    constraint: Dict[str, float] = field(default_factory=default_constraint)
+    coupling: Dict[str, Dict[str, float]] = field(default_factory=default_coupling)
     history_passes: int = 0
