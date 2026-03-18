@@ -13,13 +13,17 @@ def update_coupling(
     max_weight: float = 0.5,
 ) -> Dict[str, Dict[str, float]]:
     """
-    Adaptive + decay + normalization-ready coupling update.
+    Adaptive coupling update with:
+    - growth under correlated strain
+    - controlled decay
+    - row-wise normalization
+    - bounded weights
     """
     updated = {
         source: dict(targets) for source, targets in coupling.items()
     }
 
-    # --- adaptive growth ---
+    # adaptive growth
     for source in AXES:
         for target in AXES:
             if source == target:
@@ -27,10 +31,9 @@ def update_coupling(
 
             influence = strain[source] * strain[target]
             delta_weight = lr * influence
-
             updated[source][target] += delta_weight
 
-    # --- controlled decay ---
+    # controlled decay
     for source in AXES:
         for target in AXES:
             if source == target:
@@ -38,7 +41,7 @@ def update_coupling(
 
             updated[source][target] *= (1.0 - decay)
 
-    # --- clamp ---
+    # clamp
     for source in AXES:
         for target in AXES:
             if source == target:
@@ -46,17 +49,18 @@ def update_coupling(
 
             updated[source][target] = min(
                 max_weight,
-                max(0.0, updated[source][target])
+                max(0.0, updated[source][target]),
             )
 
-    # --- normalization (row-wise) ---
+    # row-wise normalization
     for source in AXES:
         row_sum = sum(
             updated[source][target]
-            for target in AXES if target != source
+            for target in AXES
+            if target != source
         )
 
-        if row_sum > 0:
+        if row_sum > 0.0:
             for target in AXES:
                 if target == source:
                     continue
@@ -70,6 +74,9 @@ def apply_field_coupling(
     coupling: Dict[str, Dict[str, float]],
     influence_scale: float = 0.10,
 ) -> Dict[str, float]:
+    """
+    Apply cross-axis influence from the coupling matrix.
+    """
     adjusted = dict(delta)
 
     for target in AXES:
@@ -92,8 +99,9 @@ def average_coupling(coupling: Dict[str, Dict[str, float]]) -> float:
 
     for source in AXES:
         for target in AXES:
-            if source != target:
-                total += coupling[source][target]
-                count += 1
+            if source == target:
+                continue
+            total += coupling[source][target]
+            count += 1
 
     return total / count if count else 0.0
