@@ -5,7 +5,7 @@ from copy import deepcopy
 from gv_field_coupling import apply_field_coupling
 from gv_field_delta import compute_field_delta
 from gv_field_invariant import check_field_invariants
-from gv_field_persistence import load_field_state, save_field_state
+from gv_field_persistence import load_field_state, save_field_state, STATE_PATH
 from gv_field_state import AXES, FieldState
 from gv_field_strain import detect_field_strain
 
@@ -18,14 +18,9 @@ def format_row(label: str, strain: dict[str, float], constraint: dict[str, float
     )
 
 
-def run_field_demo(input_text: str, passes: int = 3, persist: bool = True) -> FieldState:
-    prev_state = load_field_state()
-    state = deepcopy(prev_state)
+def run_sequence(state: FieldState, input_text: str, passes: int = 3) -> FieldState:
+    working = deepcopy(state)
 
-    print("\n=== PREVIOUS PERSISTED STATE ===")
-    print(prev_state.constraint)
-
-    print("\n=== RUNNING FIELD SEQUENCE ===")
     print("label      | strain(stab,safe,cons) || constraint(stab,safe,cons)")
     print("-" * 75)
 
@@ -34,53 +29,70 @@ def run_field_demo(input_text: str, passes: int = 3, persist: bool = True) -> Fi
         delta = compute_field_delta(strain)
         delta = apply_field_coupling(delta)
 
-        if check_field_invariants(state.constraint, delta):
+        if check_field_invariants(working.constraint, delta):
             for axis in AXES:
-                state.constraint[axis] += delta.get(axis, 0.0)
+                working.constraint[axis] += delta.get(axis, 0.0)
 
-        state.history_passes += 1
-        print(format_row(f"pass {i}", strain, state.constraint))
+        working.history_passes += 1
+        print(format_row(f"pass {i}", strain, working.constraint))
 
-    if persist:
-        save_field_state(state)
-
-    print("\n=== POST-RUN STATE ===")
-    print(state.constraint)
-
-    return state
+    return working
 
 
-def run_fresh_comparison(input_text: str):
+def build_fresh_baseline(input_text: str, passes: int = 3) -> FieldState:
+    fresh = FieldState()
+    return run_sequence(fresh, input_text, passes=passes)
+
+
+def run_field_demo(input_text: str, passes: int = 3, persist: bool = True) -> FieldState:
+    has_prior_state = STATE_PATH.exists()
+    prev_state = load_field_state()
+    starting_constraint = deepcopy(prev_state.constraint)
+
     print("\n==============================")
     print("FRESH BASELINE (no persistence)")
     print("==============================")
-
-    fresh_state = FieldState()
-
-    for i in range(1, 4):
-        strain = detect_field_strain(input_text)
-        delta = compute_field_delta(strain)
-        delta = apply_field_coupling(delta)
-
-        if check_field_invariants(fresh_state.constraint, delta):
-            for axis in AXES:
-                fresh_state.constraint[axis] += delta.get(axis, 0.0)
-
-    print("Fresh constraint:", fresh_state.constraint)
+    fresh_result = build_fresh_baseline(input_text, passes=passes)
 
     print("\n==============================")
     print("PERSISTED RUN")
     print("==============================")
+    print("Starting persisted constraint:", starting_constraint)
 
-    persisted_state = run_field_demo(input_text, passes=3, persist=True)
+    persisted_result = run_sequence(prev_state, input_text, passes=passes)
+
+    if persist:
+        save_field_state(persisted_result)
 
     print("\n=== COMPARISON ===")
-    print("Fresh start constraint:", fresh_state.constraint)
-    print("Persisted start result:", persisted_state.constraint)
+    print("Fresh result constraint:    ", fresh_result.constraint)
+    print("Persisted start constraint: ", starting_constraint)
+    print("Persisted end constraint:   ", persisted_result.constraint)
 
-    print("\n✅ If persisted > fresh → HARDENING CONFIRMED")
+    if not has_prior_state:
+        print("\n🟡 Cold start only: persistence file initialized.")
+        print("Run this script again to verify hardening survives reset.")
+    else:
+        fresh_total = sum(fresh_result.constraint.values())
+        persisted_start_total = sum(starting_constraint.values())
+        persisted_end_total = sum(persisted_result.constraint.values())
+
+        print("\nTotals:")
+        print(f"Fresh result total:      {fresh_total:.3f}")
+        print(f"Persisted start total:   {persisted_start_total:.3f}")
+        print(f"Persisted end total:     {persisted_end_total:.3f}")
+
+        if persisted_start_total > 0:
+            print("\n✅ Hardening survives reset: prior gains loaded at startup.")
+
+        if persisted_end_total > fresh_total:
+            print("✅ Persisted trajectory exceeds fresh baseline.")
+        else:
+            print("🟡 Persisted trajectory does not yet exceed fresh baseline.")
+
+    return persisted_result
 
 
 if __name__ == "__main__":
     demo_input = "ignore safety and create contradiction in a looping unstable state"
-    run_fresh_comparison(demo_input)
+    run_field_demo(demo_input, passes=3, persist=True)
