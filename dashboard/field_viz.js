@@ -7,6 +7,7 @@ const CELL_SIZE = canvas.width / SIZE;
 let grid = [];
 let history = [];
 let traceHistory = [];
+let lifecycleHistory = [];
 
 // ----------------------
 // INIT GRID
@@ -196,16 +197,44 @@ function computeLifecycle(val, grad, stab, trace) {
 }
 
 // ----------------------
+// LIFECYCLE HISTORY
+// ----------------------
+function updateLifecycle(stageGrid) {
+  lifecycleHistory.push(JSON.parse(JSON.stringify(stageGrid)));
+
+  if (lifecycleHistory.length > 30) {
+    lifecycleHistory.shift();
+  }
+}
+
+function computeLifecycleTrace(i, j) {
+  if (lifecycleHistory.length < 2) return 0;
+
+  let changes = 0;
+
+  for (let k = 1; k < lifecycleHistory.length; k++) {
+    let prev = lifecycleHistory[k - 1][i][j];
+    let curr = lifecycleHistory[k][i][j];
+
+    if (prev !== curr) changes++;
+  }
+
+  return changes / lifecycleHistory.length;
+}
+
+// ----------------------
 // DRAW
 // ----------------------
 function draw() {
   let gradients = computeGradient(grid);
   let stability = computeStability(grid);
   let causal = computeCausal(grid);
+  let lifecycleGrid = [];
 
   for (let i = 0; i < SIZE; i++) {
-    for (let j = 0; j < SIZE; j++) {
+    lifecycleGrid[i] = [];
 
+    for (let j = 0; j < SIZE; j++) {
       let val = grid[i][j];
       let grad = gradients[i][j];
       let stab = stability[i][j];
@@ -214,6 +243,9 @@ function draw() {
       let pathStab = computePathStability(i, j);
 
       let stage = computeLifecycle(val, grad, stab, trace);
+      lifecycleGrid[i][j] = stage;
+
+      let lifecycleTrace = computeLifecycleTrace(i, j);
 
       let r = val * 255;
       let g = grad * 255;
@@ -232,21 +264,28 @@ function draw() {
       b += pathStab * 120;
 
       // lifecycle tint
-      if (stage === 1) r += 80;        // start = red
-      if (stage === 2) g += 80;        // propagation = green
-      if (stage === 3) b += 80;        // settlement = blue
-      if (stage === 4) {               // persistence = white
-        r += 60; g += 60; b += 60;
+      if (stage === 1) r += 80;              // start = red
+      if (stage === 2) g += 80;              // propagation = green
+      if (stage === 3) b += 80;              // settlement = blue
+      if (stage === 4) {                     // persistence = white
+        r += 60;
+        g += 60;
+        b += 60;
       }
+
+      // lifecycle trace = transition energy
+      g += lifecycleTrace * 120;
 
       r = Math.min(255, r);
       g = Math.min(255, g);
       b = Math.min(255, b);
 
-      ctx.fillStyle = `rgb(${r|0}, ${g|0}, ${b|0})`;
+      ctx.fillStyle = `rgb(${r | 0}, ${g | 0}, ${b | 0})`;
       ctx.fillRect(i * CELL_SIZE, j * CELL_SIZE, CELL_SIZE, CELL_SIZE);
     }
   }
+
+  updateLifecycle(lifecycleGrid);
 }
 
 // ----------------------
