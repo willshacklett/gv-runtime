@@ -14,15 +14,17 @@ let originMap = [];
 let clusterHistory = [];
 let loading = false;
 
-// VIEW MODES
-let mode = "full"; 
-// options: full, origin, persistence, clusters
+// BLEND CONTROLS
+let showOrigin = true;
+let showPersistence = true;
+let showClusters = true;
+let showBase = true;
 
 window.addEventListener("keydown", (e) => {
-  if (e.key === "1") mode = "full";
-  if (e.key === "2") mode = "origin";
-  if (e.key === "3") mode = "persistence";
-  if (e.key === "4") mode = "clusters";
+  if (e.key === "1") showBase = !showBase;
+  if (e.key === "2") showOrigin = !showOrigin;
+  if (e.key === "3") showPersistence = !showPersistence;
+  if (e.key === "4") showClusters = !showClusters;
 });
 
 // ----------------------
@@ -238,19 +240,23 @@ function draw() {
 
       let r = 0, gC = 0, b = 0;
 
-      if (mode === "full") {
-        r = val * 255 + origin * 255;
-        gC = grad * 255;
-        b = stab * 255 + persistence * 200;
+      if (showBase) {
+        r += val * 255;
+        gC += grad * 255;
+        b += stab * 255;
       }
 
-      if (mode === "origin") {
-        r = origin * 255;
+      if (showOrigin) {
+        r += origin * 255;
       }
 
-      if (mode === "persistence") {
-        b = persistence * 255;
+      if (showPersistence) {
+        b += persistence * 255;
       }
+
+      r = Math.min(255, r);
+      gC = Math.min(255, gC);
+      b = Math.min(255, b);
 
       ctx.fillStyle = `rgb(${r|0},${gC|0},${b|0})`;
       ctx.fillRect(i * CELL_SIZE, j * CELL_SIZE, CELL_SIZE, CELL_SIZE);
@@ -260,12 +266,12 @@ function draw() {
   lifecycleHistory.push(JSON.parse(JSON.stringify(life)));
   if (lifecycleHistory.length > 30) lifecycleHistory.shift();
 
-  if (mode === "clusters") {
+  if (showClusters) {
     let clusters = detectClusters();
 
     for (let cluster of clusters) {
       for (let [i, j] of cluster) {
-        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.fillStyle = "rgba(255,255,255,0.3)";
         ctx.fillRect(i * CELL_SIZE, j * CELL_SIZE, CELL_SIZE, CELL_SIZE);
       }
     }
