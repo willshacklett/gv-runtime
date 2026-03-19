@@ -14,8 +14,17 @@ let originMap = [];
 let clusterHistory = [];
 let loading = false;
 
-// ----------------------
-// INIT
+// VIEW MODES
+let mode = "full"; 
+// options: full, origin, persistence, clusters
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "1") mode = "full";
+  if (e.key === "2") mode = "origin";
+  if (e.key === "3") mode = "persistence";
+  if (e.key === "4") mode = "clusters";
+});
+
 // ----------------------
 function makeGrid(val = 0) {
   let g = [];
@@ -28,18 +37,16 @@ function makeGrid(val = 0) {
   return g;
 }
 
-grid = makeGrid(0);
-stagePersistenceMap = makeGrid(0);
-originMap = makeGrid(0);
+grid = makeGrid();
+stagePersistenceMap = makeGrid();
+originMap = makeGrid();
 
-// ----------------------
-// LOAD LIVE STATE
 // ----------------------
 function normalize(data) {
   let src = Array.isArray(data) ? data : data.grid;
-  if (!src || !src.length) return makeGrid(0);
+  if (!src || !src.length) return makeGrid();
 
-  let out = makeGrid(0);
+  let out = makeGrid();
 
   for (let i = 0; i < SIZE; i++) {
     for (let j = 0; j < SIZE; j++) {
@@ -53,6 +60,7 @@ function normalize(data) {
   return out;
 }
 
+// ----------------------
 async function loadState() {
   if (loading) return;
   loading = true;
@@ -61,9 +69,7 @@ async function loadState() {
     let res = await fetch(STATE_URL, { cache: "no-store" });
     let data = await res.json();
     grid = normalize(data);
-  } catch (e) {
-    console.warn("state load failed", e);
-  }
+  } catch (e) {}
 
   loading = false;
 }
@@ -73,7 +79,6 @@ async function loadState() {
 // ----------------------
 function gradient() {
   let g = makeGrid();
-
   for (let i = 0; i < SIZE; i++) {
     for (let j = 0; j < SIZE; j++) {
       let c = grid[i][j];
@@ -82,7 +87,6 @@ function gradient() {
       g[i][j] = Math.sqrt(dx * dx + dy * dy);
     }
   }
-
   return g;
 }
 
@@ -99,7 +103,6 @@ function stability() {
       s[i][j] = 1 - Math.abs(grid[i][j] - prev[i][j]);
     }
   }
-
   return s;
 }
 
@@ -127,8 +130,6 @@ function causal() {
 }
 
 // ----------------------
-// TRACE
-// ----------------------
 function updateTrace() {
   traceHistory.push(JSON.parse(JSON.stringify(grid)));
   if (traceHistory.length > 25) traceHistory.shift();
@@ -148,8 +149,6 @@ function trace(i, j) {
 }
 
 // ----------------------
-// LIFECYCLE
-// ----------------------
 function lifecycle(val, grad, stab, tr) {
   if (grad > 0.2 && tr < 0.1) return 1;
   if (grad > 0.2 && tr > 0.1) return 2;
@@ -158,8 +157,6 @@ function lifecycle(val, grad, stab, tr) {
   return 0;
 }
 
-// ----------------------
-// ORIGIN + PERSISTENCE
 // ----------------------
 function updateOrigin(i, j, tr) {
   if (tr > 0.2) originMap[i][j] += 1;
@@ -206,30 +203,6 @@ function detectClusters(threshold = 0.6) {
   return clusters;
 }
 
-function overlap(a, b) {
-  let set = new Set(b.map(p => p.join(",")));
-  let m = 0;
-  for (let p of a) if (set.has(p.join(","))) m++;
-  return m / a.length;
-}
-
-function clusterStability(cluster) {
-  if (clusterHistory.length < 2) return 0;
-
-  let count = 0;
-
-  for (let past of clusterHistory) {
-    for (let c of past) {
-      if (overlap(cluster, c) > 0.6) {
-        count++;
-        break;
-      }
-    }
-  }
-
-  return count / clusterHistory.length;
-}
-
 // ----------------------
 // DRAW
 // ----------------------
@@ -239,6 +212,8 @@ function draw() {
   let c = causal();
 
   let life = makeGrid();
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
   for (let i = 0; i < SIZE; i++) {
     for (let j = 0; j < SIZE; j++) {
@@ -261,24 +236,21 @@ function draw() {
       let persistence = stagePersistenceMap[i][j] / 50;
       let origin = originMap[i][j] / 20;
 
-      let r = val * 255;
-      let gC = grad * 255;
-      let b = stab * 255;
+      let r = 0, gC = 0, b = 0;
 
-      r += cause * 120;
-      r += origin * 255;
+      if (mode === "full") {
+        r = val * 255 + origin * 255;
+        gC = grad * 255;
+        b = stab * 255 + persistence * 200;
+      }
 
-      let glow = tr * 150;
-      r += glow;
-      gC += glow;
-      b += glow;
+      if (mode === "origin") {
+        r = origin * 255;
+      }
 
-      b += persistence * 200;
-
-      if (stage === 1) r += 80;
-      if (stage === 2) gC += 80;
-      if (stage === 3) b += 80;
-      if (stage === 4) { r += 60; gC += 60; b += 60; }
+      if (mode === "persistence") {
+        b = persistence * 255;
+      }
 
       ctx.fillStyle = `rgb(${r|0},${gC|0},${b|0})`;
       ctx.fillRect(i * CELL_SIZE, j * CELL_SIZE, CELL_SIZE, CELL_SIZE);
@@ -288,24 +260,18 @@ function draw() {
   lifecycleHistory.push(JSON.parse(JSON.stringify(life)));
   if (lifecycleHistory.length > 30) lifecycleHistory.shift();
 
-  // CLUSTERS
-  let clusters = detectClusters();
-  clusterHistory.push(clusters);
-  if (clusterHistory.length > 50) clusterHistory.shift();
+  if (mode === "clusters") {
+    let clusters = detectClusters();
 
-  for (let cluster of clusters) {
-    let stab = clusterStability(cluster);
-
-    for (let [i, j] of cluster) {
-      let intensity = stab * 255;
-      ctx.fillStyle = `rgba(${intensity},${intensity},${intensity},0.4)`;
-      ctx.fillRect(i * CELL_SIZE, j * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+    for (let cluster of clusters) {
+      for (let [i, j] of cluster) {
+        ctx.fillStyle = "rgba(255,255,255,0.4)";
+        ctx.fillRect(i * CELL_SIZE, j * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+      }
     }
   }
 }
 
-// ----------------------
-// LOOP
 // ----------------------
 async function loop() {
   await loadState();
