@@ -9,6 +9,7 @@ let history = [];
 let traceHistory = [];
 let lifecycleHistory = [];
 let stagePersistenceMap = [];
+let originMap = [];
 
 // ----------------------
 // INIT
@@ -16,10 +17,12 @@ let stagePersistenceMap = [];
 for (let i = 0; i < SIZE; i++) {
   grid[i] = [];
   stagePersistenceMap[i] = [];
+  originMap[i] = [];
 
   for (let j = 0; j < SIZE; j++) {
     grid[i][j] = Math.random() * 0.2;
     stagePersistenceMap[i][j] = 0;
+    originMap[i][j] = 0;
   }
 }
 
@@ -160,28 +163,14 @@ function computeLifecycle(val, grad, stab, trace) {
 }
 
 // ----------------------
-// PERSISTENCE + RECLASS
+// ORIGIN DETECTION
 // ----------------------
-function updatePersistence(i, j, currentStage, prevStage) {
-  if (currentStage === prevStage) {
-    stagePersistenceMap[i][j]++;
+function updateOrigins(i, j, trace) {
+  if (trace > 0.2) {
+    originMap[i][j] += 1;
   } else {
-    stagePersistenceMap[i][j] = 0;
+    originMap[i][j] *= 0.95; // decay
   }
-}
-
-function computeReclass(i, j) {
-  if (lifecycleHistory.length < 2) return 0;
-
-  let changes = 0;
-
-  for (let k = 1; k < lifecycleHistory.length; k++) {
-    if (lifecycleHistory[k][i][j] !== lifecycleHistory[k - 1][i][j]) {
-      changes++;
-    }
-  }
-
-  return changes / lifecycleHistory.length;
 }
 
 // ----------------------
@@ -211,10 +200,16 @@ function draw() {
         ? lifecycleHistory[lifecycleHistory.length - 1][i][j]
         : stage;
 
-      updatePersistence(i, j, stage, prevStage);
+      if (stage === prevStage) {
+        stagePersistenceMap[i][j]++;
+      } else {
+        stagePersistenceMap[i][j] = 0;
+      }
+
+      updateOrigins(i, j, trace);
 
       let persistence = stagePersistenceMap[i][j] / 50;
-      let reclass = computeReclass(i, j);
+      let origin = originMap[i][j] / 20;
 
       let r = val * 255;
       let g = grad * 255;
@@ -223,15 +218,11 @@ function draw() {
       // pressure
       r += cause * 120;
 
-      // trace glow
-      let t = trace * 150;
-      r += t; g += t; b += t;
+      // origin overlay (RED HOT)
+      r += origin * 255;
 
-      // persistence = deep blue
+      // persistence depth (BLUE)
       b += persistence * 200;
-
-      // reclass = green flicker
-      g += reclass * 200;
 
       // lifecycle tint
       if (stage === 1) r += 80;
