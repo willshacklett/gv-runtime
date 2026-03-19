@@ -8,14 +8,18 @@ let grid = [];
 let history = [];
 let traceHistory = [];
 let lifecycleHistory = [];
+let stagePersistenceMap = [];
 
 // ----------------------
 // INIT
 // ----------------------
 for (let i = 0; i < SIZE; i++) {
   grid[i] = [];
+  stagePersistenceMap[i] = [];
+
   for (let j = 0; j < SIZE; j++) {
     grid[i][j] = Math.random() * 0.2;
+    stagePersistenceMap[i][j] = 0;
   }
 }
 
@@ -155,28 +159,18 @@ function computeLifecycle(val, grad, stab, trace) {
   return 0;
 }
 
-function updateLifecycle(stageGrid) {
-  lifecycleHistory.push(JSON.parse(JSON.stringify(stageGrid)));
-  if (lifecycleHistory.length > 30) lifecycleHistory.shift();
-}
-
 // ----------------------
-// TEMPORAL + RECLASS
+// PERSISTENCE + RECLASS
 // ----------------------
-function computeTemporalStability(i, j) {
-  if (lifecycleHistory.length < 5) return 0;
-
-  let same = 0;
-  let base = lifecycleHistory[0][i][j];
-
-  for (let k = 1; k < lifecycleHistory.length; k++) {
-    if (lifecycleHistory[k][i][j] === base) same++;
+function updatePersistence(i, j, currentStage, prevStage) {
+  if (currentStage === prevStage) {
+    stagePersistenceMap[i][j]++;
+  } else {
+    stagePersistenceMap[i][j] = 0;
   }
-
-  return same / lifecycleHistory.length;
 }
 
-function computeReclassHeat(i, j) {
+function computeReclass(i, j) {
   if (lifecycleHistory.length < 2) return 0;
 
   let changes = 0;
@@ -213,8 +207,14 @@ function draw() {
       let stage = computeLifecycle(val, grad, stab, trace);
       lifecycleGrid[i][j] = stage;
 
-      let temporal = computeTemporalStability(i, j);
-      let reclass = computeReclassHeat(i, j);
+      let prevStage = lifecycleHistory.length
+        ? lifecycleHistory[lifecycleHistory.length - 1][i][j]
+        : stage;
+
+      updatePersistence(i, j, stage, prevStage);
+
+      let persistence = stagePersistenceMap[i][j] / 50;
+      let reclass = computeReclass(i, j);
 
       let r = val * 255;
       let g = grad * 255;
@@ -223,15 +223,15 @@ function draw() {
       // pressure
       r += cause * 120;
 
-      // trace
+      // trace glow
       let t = trace * 150;
       r += t; g += t; b += t;
 
-      // temporal stability (blue depth)
-      b += temporal * 150;
+      // persistence = deep blue
+      b += persistence * 200;
 
-      // reclassification heat (green flicker)
-      g += reclass * 150;
+      // reclass = green flicker
+      g += reclass * 200;
 
       // lifecycle tint
       if (stage === 1) r += 80;
@@ -248,7 +248,8 @@ function draw() {
     }
   }
 
-  updateLifecycle(lifecycleGrid);
+  lifecycleHistory.push(JSON.parse(JSON.stringify(lifecycleGrid)));
+  if (lifecycleHistory.length > 30) lifecycleHistory.shift();
 }
 
 // ----------------------
