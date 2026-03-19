@@ -18,7 +18,7 @@ for (let i = 0; i < SIZE; i++) {
 }
 
 // ----------------------
-// STEP FUNCTION (FIELD EVOLUTION)
+// STEP FUNCTION
 // ----------------------
 function step() {
   let newGrid = [];
@@ -32,15 +32,11 @@ function step() {
 
       let avg = neighbors.reduce((a, b) => a + b, 0) / neighbors.length;
 
-      // Coupling (toward neighbors)
       let coupling = (avg - value) * 0.1;
-
-      // Controlled decay
       let decay = value * 0.02;
 
       let next = value + coupling - decay;
 
-      // Clamp bounds
       next = Math.max(0, Math.min(1, next));
 
       newGrid[i][j] = next;
@@ -128,22 +124,63 @@ function computeStability(grid) {
 }
 
 // ----------------------
+// CAUSAL MAP
+// ----------------------
+function computeCausalMap(grid) {
+  let causal = [];
+
+  for (let i = 0; i < SIZE; i++) {
+    causal[i] = [];
+
+    for (let j = 0; j < SIZE; j++) {
+      let center = grid[i][j];
+
+      let neighbors = [];
+
+      if (i > 0) neighbors.push(grid[i - 1][j]);
+      if (i < SIZE - 1) neighbors.push(grid[i + 1][j]);
+      if (j > 0) neighbors.push(grid[i][j - 1]);
+      if (j < SIZE - 1) neighbors.push(grid[i][j + 1]);
+
+      let influence = 0;
+
+      for (let n of neighbors) {
+        influence += Math.abs(n - center);
+      }
+
+      causal[i][j] = influence / neighbors.length;
+    }
+  }
+
+  return causal;
+}
+
+// ----------------------
 // DRAW FUNCTION
 // ----------------------
 function draw() {
   let gradients = computeGradient(grid);
   let stability = computeStability(grid);
+  let causal = computeCausalMap(grid);
 
   for (let i = 0; i < SIZE; i++) {
     for (let j = 0; j < SIZE; j++) {
 
-      let val = grid[i][j];        // base field
-      let grad = gradients[i][j];  // flow
-      let stab = stability[i][j];  // equilibrium
+      let val = grid[i][j];       // field strength
+      let grad = gradients[i][j]; // flow intensity
+      let stab = stability[i][j]; // stability
+      let cause = causal[i][j];   // causal pressure
 
-      let r = Math.floor(val * 255);     // field strength
-      let g = Math.floor(grad * 255);    // gradient intensity
-      let b = Math.floor(stab * 255);    // stability
+      // Base RGB
+      let r = Math.floor(val * 255);
+      let g = Math.floor(grad * 255);
+      let b = Math.floor(stab * 255);
+
+      // Boost intensity based on causal influence
+      let intensity = Math.min(1, cause * 2);
+
+      r = Math.min(255, r + intensity * 80);
+      g = Math.min(255, g + intensity * 80);
 
       ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
       ctx.fillRect(i * CELL_SIZE, j * CELL_SIZE, CELL_SIZE, CELL_SIZE);
