@@ -3,6 +3,7 @@ const ctx = canvas.getContext("2d");
 
 const SIZE = 50;
 const CELL_SIZE = canvas.width / SIZE;
+const STATE_URL = "./data/state.json";
 
 let grid = [];
 let history = [];
@@ -10,55 +11,101 @@ let traceHistory = [];
 let lifecycleHistory = [];
 let stagePersistenceMap = [];
 let originMap = [];
+let loading = false;
 
 // ----------------------
-// INIT
+// INIT EMPTY GRID
 // ----------------------
-for (let i = 0; i < SIZE; i++) {
-  grid[i] = [];
-  stagePersistenceMap[i] = [];
-  originMap[i] = [];
-
-  for (let j = 0; j < SIZE; j++) {
-    grid[i][j] = Math.random() * 0.2;
-    stagePersistenceMap[i][j] = 0;
-    originMap[i][j] = 0;
+function makeEmptyGrid(size, fill = 0) {
+  const out = [];
+  for (let i = 0; i < size; i++) {
+    out[i] = [];
+    for (let j = 0; j < size; j++) {
+      out[i][j] = fill;
+    }
   }
+  return out;
 }
 
+function initializeState() {
+  grid = makeEmptyGrid(SIZE, 0);
+  stagePersistenceMap = makeEmptyGrid(SIZE, 0);
+  originMap = makeEmptyGrid(SIZE, 0);
+}
+
+initializeState();
+
 // ----------------------
-// STEP
+// NORMALIZE INCOMING GRID
 // ----------------------
-function step() {
-  let newGrid = [];
+function normalizeIncomingGrid(data) {
+  // Accept either:
+  // 1) a raw 2D array
+  // 2) { grid: [...] }
+  const source = Array.isArray(data) ? data : data?.grid;
+
+  if (!Array.isArray(source) || source.length === 0) {
+    return makeEmptyGrid(SIZE, 0);
+  }
+
+  const inRows = source.length;
+  const inCols = Array.isArray(source[0]) ? source[0].length : 0;
+
+  if (!inCols) {
+    return makeEmptyGrid(SIZE, 0);
+  }
+
+  // Resample/fit into SIZE x SIZE
+  const out = makeEmptyGrid(SIZE, 0);
 
   for (let i = 0; i < SIZE; i++) {
-    newGrid[i] = [];
-
     for (let j = 0; j < SIZE; j++) {
-      let value = grid[i][j];
-      let neighbors = getNeighbors(i, j);
+      const srcI = Math.min(inRows - 1, Math.floor((i / SIZE) * inRows));
+      const srcJ = Math.min(inCols - 1, Math.floor((j / SIZE) * inCols));
 
-      let avg = neighbors.reduce((a, b) => a + b, 0) / neighbors.length;
+      let value = Number(source[srcI][srcJ]);
+      if (!Number.isFinite(value)) value = 0;
 
-      let next = value + (avg - value) * 0.1 - value * 0.02;
-      next = Math.max(0, Math.min(1, next));
-
-      newGrid[i][j] = next;
+      // Clamp to [0, 1]
+      out[i][j] = Math.max(0, Math.min(1, value));
     }
   }
 
-  grid = newGrid;
+  return out;
 }
 
+// ----------------------
+// LIVE STATE LOAD
+// ----------------------
+async function loadState() {
+  if (loading) return;
+  loading = true;
+
+  try {
+    const res = await fetch(STATE_URL, { cache: "no-store" });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    grid = normalizeIncomingGrid(data);
+  } catch (err) {
+    console.warn("Failed to load live state, keeping previous grid:", err);
+  } finally {
+    loading = false;
+  }
+}
+
+// ----------------------
+// NEIGHBORS
 // ----------------------
 function getNeighbors(x, y) {
   let vals = [];
 
   for (let dx = -1; dx <= 1; dx++) {
     for (let dy = -1; dy <= 1; dy++) {
-      let nx = x + dx;
-      let ny = y + dy;
+      const nx = x + dx;
+      const ny = y + dy;
 
       if (nx >= 0 && ny >= 0 && nx < SIZE && ny < SIZE) {
         vals.push(grid[nx][ny]);
@@ -79,9 +126,9 @@ function computeGradient(grid) {
     out[i] = [];
 
     for (let j = 0; j < SIZE; j++) {
-      let c = grid[i][j];
-      let dx = (grid[i][j + 1] ?? c) - c;
-      let dy = (grid[i + 1]?.[j] ?? c) - c;
+      const c = grid[i][j];
+      const dx = (grid[i][j + 1] ?? c) - c;
+      const dy = (grid[i + 1]?.[j] ?? c) - c;
       out[i][j] = Math.sqrt(dx * dx + dy * dy);
     }
   }
@@ -92,10 +139,11 @@ function computeGradient(grid) {
 function computeStability(grid) {
   history.push(JSON.stringify(grid));
   if (history.length > 10) history.shift();
+
   if (history.length < 2) return grid;
 
-  let prev = JSON.parse(history[0]);
-  let out = [];
+  const prev = JSON.parse(history[0]);
+  const out = [];
 
   for (let i = 0; i < SIZE; i++) {
     out[i] = [];
@@ -114,8 +162,8 @@ function computeCausal(grid) {
     out[i] = [];
 
     for (let j = 0; j < SIZE; j++) {
-      let c = grid[i][j];
-      let n = [];
+      const c = grid[i][j];
+      const n = [];
 
       if (i > 0) n.push(grid[i - 1][j]);
       if (i < SIZE - 1) n.push(grid[i + 1][j]);
@@ -123,9 +171,9 @@ function computeCausal(grid) {
       if (j < SIZE - 1) n.push(grid[i][j + 1]);
 
       let sum = 0;
-      for (let v of n) sum += Math.abs(v - c);
+      for (const v of n) sum += Math.abs(v - c);
 
-      out[i][j] = sum / n.length;
+      out[i][j] = n.length ? sum / n.length : 0;
     }
   }
 
@@ -155,21 +203,29 @@ function computeTrace(i, j) {
 // LIFECYCLE
 // ----------------------
 function computeLifecycle(val, grad, stab, trace) {
-  if (grad > 0.2 && trace < 0.1) return 1;
-  if (grad > 0.2 && trace > 0.1) return 2;
-  if (stab > 0.8 && trace > 0.1) return 3;
-  if (stab > 0.9 && trace < 0.05) return 4;
+  if (grad > 0.2 && trace < 0.1) return 1; // origin/start
+  if (grad > 0.2 && trace > 0.1) return 2; // propagation
+  if (stab > 0.8 && trace > 0.1) return 3; // settlement
+  if (stab > 0.9 && trace < 0.05) return 4; // persistence
   return 0;
 }
 
 // ----------------------
-// ORIGIN DETECTION
+// ORIGIN + PERSISTENCE
 // ----------------------
 function updateOrigins(i, j, trace) {
   if (trace > 0.2) {
     originMap[i][j] += 1;
   } else {
-    originMap[i][j] *= 0.95; // decay
+    originMap[i][j] *= 0.95;
+  }
+}
+
+function updatePersistence(i, j, currentStage, prevStage) {
+  if (currentStage === prevStage) {
+    stagePersistenceMap[i][j]++;
+  } else {
+    stagePersistenceMap[i][j] = 0;
   }
 }
 
@@ -177,64 +233,69 @@ function updateOrigins(i, j, trace) {
 // DRAW
 // ----------------------
 function draw() {
-  let gradients = computeGradient(grid);
-  let stability = computeStability(grid);
-  let causal = computeCausal(grid);
+  const gradients = computeGradient(grid);
+  const stability = computeStability(grid);
+  const causal = computeCausal(grid);
 
-  let lifecycleGrid = [];
+  const lifecycleGrid = [];
 
   for (let i = 0; i < SIZE; i++) {
     lifecycleGrid[i] = [];
 
     for (let j = 0; j < SIZE; j++) {
-      let val = grid[i][j];
-      let grad = gradients[i][j];
-      let stab = stability[i][j];
-      let cause = causal[i][j];
-      let trace = computeTrace(i, j);
+      const val = grid[i][j];
+      const grad = gradients[i][j];
+      const stab = stability[i][j];
+      const cause = causal[i][j];
+      const trace = computeTrace(i, j);
 
-      let stage = computeLifecycle(val, grad, stab, trace);
+      const stage = computeLifecycle(val, grad, stab, trace);
       lifecycleGrid[i][j] = stage;
 
-      let prevStage = lifecycleHistory.length
+      const prevStage = lifecycleHistory.length
         ? lifecycleHistory[lifecycleHistory.length - 1][i][j]
         : stage;
 
-      if (stage === prevStage) {
-        stagePersistenceMap[i][j]++;
-      } else {
-        stagePersistenceMap[i][j] = 0;
-      }
-
+      updatePersistence(i, j, stage, prevStage);
       updateOrigins(i, j, trace);
 
-      let persistence = stagePersistenceMap[i][j] / 50;
-      let origin = originMap[i][j] / 20;
+      const persistence = stagePersistenceMap[i][j] / 50;
+      const origin = originMap[i][j] / 20;
 
       let r = val * 255;
       let g = grad * 255;
       let b = stab * 255;
 
-      // pressure
+      // pressure / causal heat
       r += cause * 120;
 
-      // origin overlay (RED HOT)
+      // origin overlay
       r += origin * 255;
 
-      // persistence depth (BLUE)
+      // trace glow
+      const t = trace * 150;
+      r += t;
+      g += t;
+      b += t;
+
+      // persistence depth
       b += persistence * 200;
 
       // lifecycle tint
       if (stage === 1) r += 80;
       if (stage === 2) g += 80;
       if (stage === 3) b += 80;
-      if (stage === 4) { r += 60; g += 60; b += 60; }
+      if (stage === 4) {
+        r += 60;
+        g += 60;
+        b += 60;
+      }
 
       r = Math.min(255, r);
       g = Math.min(255, g);
       b = Math.min(255, b);
 
-      ctx.fillStyle = `rgb(${r|0}, ${g|0}, ${b|0})`;
+      ctx.fillStyle = `rgb(${r | 0}, ${g | 0}, ${b | 0})`;
       ctx.fillRect(i * CELL_SIZE, j * CELL_SIZE, CELL_SIZE, CELL_SIZE);
     }
   }
@@ -244,8 +305,10 @@ function draw() {
 }
 
 // ----------------------
-function loop() {
-  step();
+// MAIN LOOP
+// ----------------------
+async function loop() {
+  await loadState();
   updateTrace(grid);
   draw();
   requestAnimationFrame(loop);
