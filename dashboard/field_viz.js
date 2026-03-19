@@ -10,7 +10,7 @@ let traceHistory = [];
 let lifecycleHistory = [];
 
 // ----------------------
-// INIT GRID
+// INIT
 // ----------------------
 for (let i = 0; i < SIZE; i++) {
   grid[i] = [];
@@ -34,12 +34,9 @@ function step() {
 
       let avg = neighbors.reduce((a, b) => a + b, 0) / neighbors.length;
 
-      let coupling = (avg - value) * 0.1;
-      let decay = value * 0.02;
-
-      let next = value + coupling - decay;
-
+      let next = value + (avg - value) * 0.1 - value * 0.02;
       next = Math.max(0, Math.min(1, next));
+
       newGrid[i][j] = next;
     }
   }
@@ -47,8 +44,6 @@ function step() {
   grid = newGrid;
 }
 
-// ----------------------
-// NEIGHBORS
 // ----------------------
 function getNeighbors(x, y) {
   let vals = [];
@@ -68,155 +63,128 @@ function getNeighbors(x, y) {
 }
 
 // ----------------------
-// GRADIENT (FLOW)
+// METRICS
 // ----------------------
 function computeGradient(grid) {
-  let gradients = [];
+  let out = [];
 
   for (let i = 0; i < SIZE; i++) {
-    gradients[i] = [];
+    out[i] = [];
 
     for (let j = 0; j < SIZE; j++) {
-      let center = grid[i][j];
-
-      let right = grid[i][j + 1] ?? center;
-      let down = grid[i + 1]?.[j] ?? center;
-
-      let dx = right - center;
-      let dy = down - center;
-
-      gradients[i][j] = Math.sqrt(dx * dx + dy * dy);
+      let c = grid[i][j];
+      let dx = (grid[i][j + 1] ?? c) - c;
+      let dy = (grid[i + 1]?.[j] ?? c) - c;
+      out[i][j] = Math.sqrt(dx * dx + dy * dy);
     }
   }
 
-  return gradients;
+  return out;
 }
 
-// ----------------------
-// STABILITY (EQUILIBRIUM)
-// ----------------------
 function computeStability(grid) {
   history.push(JSON.stringify(grid));
-
   if (history.length > 10) history.shift();
   if (history.length < 2) return grid;
 
   let prev = JSON.parse(history[0]);
-  let stability = [];
+  let out = [];
 
   for (let i = 0; i < SIZE; i++) {
-    stability[i] = [];
+    out[i] = [];
     for (let j = 0; j < SIZE; j++) {
-      let diff = Math.abs(grid[i][j] - prev[i][j]);
-      stability[i][j] = Math.max(0, 1 - diff);
+      out[i][j] = 1 - Math.abs(grid[i][j] - prev[i][j]);
     }
   }
 
-  return stability;
+  return out;
 }
 
-// ----------------------
-// CAUSAL PRESSURE
-// ----------------------
 function computeCausal(grid) {
-  let causal = [];
+  let out = [];
 
   for (let i = 0; i < SIZE; i++) {
-    causal[i] = [];
+    out[i] = [];
 
     for (let j = 0; j < SIZE; j++) {
-      let center = grid[i][j];
-      let neighbors = [];
+      let c = grid[i][j];
+      let n = [];
 
-      if (i > 0) neighbors.push(grid[i - 1][j]);
-      if (i < SIZE - 1) neighbors.push(grid[i + 1][j]);
-      if (j > 0) neighbors.push(grid[i][j - 1]);
-      if (j < SIZE - 1) neighbors.push(grid[i][j + 1]);
+      if (i > 0) n.push(grid[i - 1][j]);
+      if (i < SIZE - 1) n.push(grid[i + 1][j]);
+      if (j > 0) n.push(grid[i][j - 1]);
+      if (j < SIZE - 1) n.push(grid[i][j + 1]);
 
-      let influence = 0;
+      let sum = 0;
+      for (let v of n) sum += Math.abs(v - c);
 
-      for (let n of neighbors) {
-        influence += Math.abs(n - center);
-      }
-
-      causal[i][j] = neighbors.length ? influence / neighbors.length : 0;
+      out[i][j] = sum / n.length;
     }
   }
 
-  return causal;
+  return out;
 }
 
 // ----------------------
-// TRACE HISTORY
+// TRACE
 // ----------------------
 function updateTrace(grid) {
   traceHistory.push(JSON.parse(JSON.stringify(grid)));
   if (traceHistory.length > 25) traceHistory.shift();
 }
 
-// ----------------------
-// TRACE (PATH)
-// ----------------------
 function computeTrace(i, j) {
   if (traceHistory.length < 2) return 0;
 
   let sum = 0;
-
   for (let k = 1; k < traceHistory.length; k++) {
-    let prev = traceHistory[k - 1][i][j];
-    let curr = traceHistory[k][i][j];
-    sum += Math.abs(curr - prev);
+    sum += Math.abs(traceHistory[k][i][j] - traceHistory[k - 1][i][j]);
   }
 
   return sum / traceHistory.length;
 }
 
 // ----------------------
-// PATH STABILITY
-// ----------------------
-function computePathStability(i, j) {
-  if (traceHistory.length < 5) return 0;
-
-  let values = traceHistory.map(s => s[i][j]);
-  let avg = values.reduce((a, b) => a + b, 0) / values.length;
-
-  let variance = values.reduce((a, b) => a + (b - avg) ** 2, 0) / values.length;
-
-  return 1 - Math.min(1, variance * 10);
-}
-
-// ----------------------
-// LIFECYCLE STAGE
+// LIFECYCLE
 // ----------------------
 function computeLifecycle(val, grad, stab, trace) {
-  if (grad > 0.2 && trace < 0.1) return 1; // start
-  if (grad > 0.2 && trace > 0.1) return 2; // propagation
-  if (stab > 0.8 && trace > 0.1) return 3; // settlement
-  if (stab > 0.9 && trace < 0.05) return 4; // persistence
+  if (grad > 0.2 && trace < 0.1) return 1;
+  if (grad > 0.2 && trace > 0.1) return 2;
+  if (stab > 0.8 && trace > 0.1) return 3;
+  if (stab > 0.9 && trace < 0.05) return 4;
   return 0;
 }
 
-// ----------------------
-// LIFECYCLE HISTORY
-// ----------------------
 function updateLifecycle(stageGrid) {
   lifecycleHistory.push(JSON.parse(JSON.stringify(stageGrid)));
-
-  if (lifecycleHistory.length > 30) {
-    lifecycleHistory.shift();
-  }
+  if (lifecycleHistory.length > 30) lifecycleHistory.shift();
 }
 
-function computeLifecycleTrace(i, j) {
+// ----------------------
+// TEMPORAL + RECLASS
+// ----------------------
+function computeTemporalStability(i, j) {
+  if (lifecycleHistory.length < 5) return 0;
+
+  let same = 0;
+  let base = lifecycleHistory[0][i][j];
+
+  for (let k = 1; k < lifecycleHistory.length; k++) {
+    if (lifecycleHistory[k][i][j] === base) same++;
+  }
+
+  return same / lifecycleHistory.length;
+}
+
+function computeReclassHeat(i, j) {
   if (lifecycleHistory.length < 2) return 0;
 
   let changes = 0;
 
   for (let k = 1; k < lifecycleHistory.length; k++) {
-    let prev = lifecycleHistory[k - 1][i][j];
-    let curr = lifecycleHistory[k][i][j];
-
-    if (prev !== curr) changes++;
+    if (lifecycleHistory[k][i][j] !== lifecycleHistory[k - 1][i][j]) {
+      changes++;
+    }
   }
 
   return changes / lifecycleHistory.length;
@@ -229,6 +197,7 @@ function draw() {
   let gradients = computeGradient(grid);
   let stability = computeStability(grid);
   let causal = computeCausal(grid);
+
   let lifecycleGrid = [];
 
   for (let i = 0; i < SIZE; i++) {
@@ -240,47 +209,41 @@ function draw() {
       let stab = stability[i][j];
       let cause = causal[i][j];
       let trace = computeTrace(i, j);
-      let pathStab = computePathStability(i, j);
 
       let stage = computeLifecycle(val, grad, stab, trace);
       lifecycleGrid[i][j] = stage;
 
-      let lifecycleTrace = computeLifecycleTrace(i, j);
+      let temporal = computeTemporalStability(i, j);
+      let reclass = computeReclassHeat(i, j);
 
       let r = val * 255;
       let g = grad * 255;
       let b = stab * 255;
 
-      // pressure heat
+      // pressure
       r += cause * 120;
 
-      // trace glow
-      let traceBoost = trace * 150;
-      r += traceBoost;
-      g += traceBoost;
-      b += traceBoost;
+      // trace
+      let t = trace * 150;
+      r += t; g += t; b += t;
 
-      // path persistence
-      b += pathStab * 120;
+      // temporal stability (blue depth)
+      b += temporal * 150;
+
+      // reclassification heat (green flicker)
+      g += reclass * 150;
 
       // lifecycle tint
-      if (stage === 1) r += 80;              // start = red
-      if (stage === 2) g += 80;              // propagation = green
-      if (stage === 3) b += 80;              // settlement = blue
-      if (stage === 4) {                     // persistence = white
-        r += 60;
-        g += 60;
-        b += 60;
-      }
-
-      // lifecycle trace = transition energy
-      g += lifecycleTrace * 120;
+      if (stage === 1) r += 80;
+      if (stage === 2) g += 80;
+      if (stage === 3) b += 80;
+      if (stage === 4) { r += 60; g += 60; b += 60; }
 
       r = Math.min(255, r);
       g = Math.min(255, g);
       b = Math.min(255, b);
 
-      ctx.fillStyle = `rgb(${r | 0}, ${g | 0}, ${b | 0})`;
+      ctx.fillStyle = `rgb(${r|0}, ${g|0}, ${b|0})`;
       ctx.fillRect(i * CELL_SIZE, j * CELL_SIZE, CELL_SIZE, CELL_SIZE);
     }
   }
@@ -288,8 +251,6 @@ function draw() {
   updateLifecycle(lifecycleGrid);
 }
 
-// ----------------------
-// LOOP
 // ----------------------
 function loop() {
   step();
