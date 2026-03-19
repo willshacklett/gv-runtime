@@ -6,6 +6,7 @@ const CELL_SIZE = canvas.width / SIZE;
 
 let grid = [];
 let history = [];
+let traceHistory = [];
 
 // ----------------------
 // INIT GRID
@@ -32,11 +33,15 @@ function step() {
 
       let avg = neighbors.reduce((a, b) => a + b, 0) / neighbors.length;
 
+      // Coupling pulls each cell toward its neighborhood
       let coupling = (avg - value) * 0.1;
+
+      // Controlled decay
       let decay = value * 0.02;
 
       let next = value + coupling - decay;
 
+      // Clamp
       next = Math.max(0, Math.min(1, next));
 
       newGrid[i][j] = next;
@@ -47,7 +52,7 @@ function step() {
 }
 
 // ----------------------
-// NEIGHBORS
+// NEIGHBOR LOOKUP
 // ----------------------
 function getNeighbors(x, y) {
   let vals = [];
@@ -85,7 +90,6 @@ function computeGradient(grid) {
       let dy = down - center;
 
       let mag = Math.sqrt(dx * dx + dy * dy);
-
       gradients[i][j] = mag;
     }
   }
@@ -108,7 +112,6 @@ function computeStability(grid) {
   }
 
   let prev = JSON.parse(history[0]);
-
   let stability = [];
 
   for (let i = 0; i < SIZE; i++) {
@@ -116,7 +119,7 @@ function computeStability(grid) {
 
     for (let j = 0; j < SIZE; j++) {
       let diff = Math.abs(grid[i][j] - prev[i][j]);
-      stability[i][j] = 1 - diff;
+      stability[i][j] = Math.max(0, 1 - diff);
     }
   }
 
@@ -134,7 +137,6 @@ function computeCausalMap(grid) {
 
     for (let j = 0; j < SIZE; j++) {
       let center = grid[i][j];
-
       let neighbors = [];
 
       if (i > 0) neighbors.push(grid[i - 1][j]);
@@ -148,7 +150,7 @@ function computeCausalMap(grid) {
         influence += Math.abs(n - center);
       }
 
-      causal[i][j] = influence / neighbors.length;
+      causal[i][j] = neighbors.length ? influence / neighbors.length : 0;
     }
   }
 
@@ -156,7 +158,32 @@ function computeCausalMap(grid) {
 }
 
 // ----------------------
-// DRAW FUNCTION
+// TRACE HISTORY
+// ----------------------
+function updateTrace(grid) {
+  traceHistory.push(JSON.parse(JSON.stringify(grid)));
+
+  if (traceHistory.length > 20) {
+    traceHistory.shift();
+  }
+}
+
+function computeTraceIntensity(i, j) {
+  if (traceHistory.length < 2) return 0;
+
+  let sum = 0;
+
+  for (let k = 1; k < traceHistory.length; k++) {
+    let prev = traceHistory[k - 1][i][j];
+    let curr = traceHistory[k][i][j];
+    sum += Math.abs(curr - prev);
+  }
+
+  return sum / traceHistory.length;
+}
+
+// ----------------------
+// DRAW
 // ----------------------
 function draw() {
   let gradients = computeGradient(grid);
@@ -165,34 +192,40 @@ function draw() {
 
   for (let i = 0; i < SIZE; i++) {
     for (let j = 0; j < SIZE; j++) {
-
       let val = grid[i][j];       // field strength
       let grad = gradients[i][j]; // flow intensity
-      let stab = stability[i][j]; // stability
-      let cause = causal[i][j];   // causal pressure
+      let stab = stability[i][j]; // equilibrium lock
+      let cause = causal[i][j];   // neighbor-driven pressure
+      let trace = computeTraceIntensity(i, j); // temporal path intensity
 
-      // Base RGB
+      // Base channels
       let r = Math.floor(val * 255);
       let g = Math.floor(grad * 255);
       let b = Math.floor(stab * 255);
 
-      // Boost intensity based on causal influence
+      // Causal boost
       let intensity = Math.min(1, cause * 2);
-
       r = Math.min(255, r + intensity * 80);
       g = Math.min(255, g + intensity * 80);
 
-      ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+      // Trace boost (white glow on evolving paths)
+      let traceBoost = Math.min(1, trace * 3);
+      r = Math.min(255, r + traceBoost * 100);
+      g = Math.min(255, g + traceBoost * 100);
+      b = Math.min(255, b + traceBoost * 100);
+
+      ctx.fillStyle = `rgb(${Math.floor(r)}, ${Math.floor(g)}, ${Math.floor(b)})`;
       ctx.fillRect(i * CELL_SIZE, j * CELL_SIZE, CELL_SIZE, CELL_SIZE);
     }
   }
 }
 
 // ----------------------
-// LOOP
+// MAIN LOOP
 // ----------------------
 function loop() {
   step();
+  updateTrace(grid);
   draw();
   requestAnimationFrame(loop);
 }
