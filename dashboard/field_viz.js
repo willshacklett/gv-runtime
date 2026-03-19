@@ -33,17 +33,12 @@ function step() {
 
       let avg = neighbors.reduce((a, b) => a + b, 0) / neighbors.length;
 
-      // Coupling pulls each cell toward its neighborhood
       let coupling = (avg - value) * 0.1;
-
-      // Controlled decay
       let decay = value * 0.02;
 
       let next = value + coupling - decay;
 
-      // Clamp
       next = Math.max(0, Math.min(1, next));
-
       newGrid[i][j] = next;
     }
   }
@@ -52,7 +47,7 @@ function step() {
 }
 
 // ----------------------
-// NEIGHBOR LOOKUP
+// NEIGHBORS
 // ----------------------
 function getNeighbors(x, y) {
   let vals = [];
@@ -72,7 +67,7 @@ function getNeighbors(x, y) {
 }
 
 // ----------------------
-// GRADIENT MAP
+// GRADIENT (FLOW)
 // ----------------------
 function computeGradient(grid) {
   let gradients = [];
@@ -89,8 +84,7 @@ function computeGradient(grid) {
       let dx = right - center;
       let dy = down - center;
 
-      let mag = Math.sqrt(dx * dx + dy * dy);
-      gradients[i][j] = mag;
+      gradients[i][j] = Math.sqrt(dx * dx + dy * dy);
     }
   }
 
@@ -98,25 +92,19 @@ function computeGradient(grid) {
 }
 
 // ----------------------
-// STABILITY MAP
+// STABILITY (EQUILIBRIUM)
 // ----------------------
 function computeStability(grid) {
   history.push(JSON.stringify(grid));
 
-  if (history.length > 10) {
-    history.shift();
-  }
-
-  if (history.length < 2) {
-    return grid;
-  }
+  if (history.length > 10) history.shift();
+  if (history.length < 2) return grid;
 
   let prev = JSON.parse(history[0]);
   let stability = [];
 
   for (let i = 0; i < SIZE; i++) {
     stability[i] = [];
-
     for (let j = 0; j < SIZE; j++) {
       let diff = Math.abs(grid[i][j] - prev[i][j]);
       stability[i][j] = Math.max(0, 1 - diff);
@@ -127,7 +115,7 @@ function computeStability(grid) {
 }
 
 // ----------------------
-// CAUSAL MAP
+// CAUSAL PRESSURE
 // ----------------------
 function computeCausalMap(grid) {
   let causal = [];
@@ -137,6 +125,7 @@ function computeCausalMap(grid) {
 
     for (let j = 0; j < SIZE; j++) {
       let center = grid[i][j];
+
       let neighbors = [];
 
       if (i > 0) neighbors.push(grid[i - 1][j]);
@@ -162,13 +151,13 @@ function computeCausalMap(grid) {
 // ----------------------
 function updateTrace(grid) {
   traceHistory.push(JSON.parse(JSON.stringify(grid)));
-
-  if (traceHistory.length > 20) {
-    traceHistory.shift();
-  }
+  if (traceHistory.length > 20) traceHistory.shift();
 }
 
-function computeTraceIntensity(i, j) {
+// ----------------------
+// TRACE INTENSITY (PATH)
+// ----------------------
+function computeTrace(i, j) {
   if (traceHistory.length < 2) return 0;
 
   let sum = 0;
@@ -183,6 +172,20 @@ function computeTraceIntensity(i, j) {
 }
 
 // ----------------------
+// PATH STABILITY
+// ----------------------
+function computePathStability(i, j) {
+  if (traceHistory.length < 5) return 0;
+
+  let values = traceHistory.map(state => state[i][j]);
+  let avg = values.reduce((a, b) => a + b, 0) / values.length;
+
+  let variance = values.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / values.length;
+
+  return 1 - Math.min(1, variance * 10);
+}
+
+// ----------------------
 // DRAW
 // ----------------------
 function draw() {
@@ -192,36 +195,44 @@ function draw() {
 
   for (let i = 0; i < SIZE; i++) {
     for (let j = 0; j < SIZE; j++) {
-      let val = grid[i][j];       // field strength
-      let grad = gradients[i][j]; // flow intensity
-      let stab = stability[i][j]; // equilibrium lock
-      let cause = causal[i][j];   // neighbor-driven pressure
-      let trace = computeTraceIntensity(i, j); // temporal path intensity
 
-      // Base channels
-      let r = Math.floor(val * 255);
-      let g = Math.floor(grad * 255);
-      let b = Math.floor(stab * 255);
+      let val = grid[i][j];
+      let grad = gradients[i][j];
+      let stab = stability[i][j];
+      let cause = causal[i][j];
+      let trace = computeTrace(i, j);
+      let pathStab = computePathStability(i, j);
 
-      // Causal boost
-      let intensity = Math.min(1, cause * 2);
-      r = Math.min(255, r + intensity * 80);
-      g = Math.min(255, g + intensity * 80);
+      // Base color channels
+      let r = val * 255;
+      let g = grad * 255;
+      let b = stab * 255;
 
-      // Trace boost (white glow on evolving paths)
-      let traceBoost = Math.min(1, trace * 3);
-      r = Math.min(255, r + traceBoost * 100);
-      g = Math.min(255, g + traceBoost * 100);
-      b = Math.min(255, b + traceBoost * 100);
+      // Pressure heat (red boost)
+      r += cause * 120;
 
-      ctx.fillStyle = `rgb(${Math.floor(r)}, ${Math.floor(g)}, ${Math.floor(b)})`;
+      // Trace paths (white glow)
+      let traceBoost = trace * 150;
+      r += traceBoost;
+      g += traceBoost;
+      b += traceBoost;
+
+      // Path stability (blue reinforcement)
+      b += pathStab * 120;
+
+      // Clamp
+      r = Math.min(255, r);
+      g = Math.min(255, g);
+      b = Math.min(255, b);
+
+      ctx.fillStyle = `rgb(${r|0}, ${g|0}, ${b|0})`;
       ctx.fillRect(i * CELL_SIZE, j * CELL_SIZE, CELL_SIZE, CELL_SIZE);
     }
   }
 }
 
 // ----------------------
-// MAIN LOOP
+// LOOP
 // ----------------------
 function loop() {
   step();
