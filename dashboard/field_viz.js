@@ -19,7 +19,7 @@ for (let i = 0; i < SIZE; i++) {
 }
 
 // ----------------------
-// STEP FUNCTION
+// STEP
 // ----------------------
 function step() {
   let newGrid = [];
@@ -117,7 +117,7 @@ function computeStability(grid) {
 // ----------------------
 // CAUSAL PRESSURE
 // ----------------------
-function computeCausalMap(grid) {
+function computeCausal(grid) {
   let causal = [];
 
   for (let i = 0; i < SIZE; i++) {
@@ -125,7 +125,6 @@ function computeCausalMap(grid) {
 
     for (let j = 0; j < SIZE; j++) {
       let center = grid[i][j];
-
       let neighbors = [];
 
       if (i > 0) neighbors.push(grid[i - 1][j]);
@@ -151,11 +150,11 @@ function computeCausalMap(grid) {
 // ----------------------
 function updateTrace(grid) {
   traceHistory.push(JSON.parse(JSON.stringify(grid)));
-  if (traceHistory.length > 20) traceHistory.shift();
+  if (traceHistory.length > 25) traceHistory.shift();
 }
 
 // ----------------------
-// TRACE INTENSITY (PATH)
+// TRACE (PATH)
 // ----------------------
 function computeTrace(i, j) {
   if (traceHistory.length < 2) return 0;
@@ -177,12 +176,23 @@ function computeTrace(i, j) {
 function computePathStability(i, j) {
   if (traceHistory.length < 5) return 0;
 
-  let values = traceHistory.map(state => state[i][j]);
+  let values = traceHistory.map(s => s[i][j]);
   let avg = values.reduce((a, b) => a + b, 0) / values.length;
 
-  let variance = values.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / values.length;
+  let variance = values.reduce((a, b) => a + (b - avg) ** 2, 0) / values.length;
 
   return 1 - Math.min(1, variance * 10);
+}
+
+// ----------------------
+// LIFECYCLE STAGE
+// ----------------------
+function computeLifecycle(val, grad, stab, trace) {
+  if (grad > 0.2 && trace < 0.1) return 1; // start
+  if (grad > 0.2 && trace > 0.1) return 2; // propagation
+  if (stab > 0.8 && trace > 0.1) return 3; // settlement
+  if (stab > 0.9 && trace < 0.05) return 4; // persistence
+  return 0;
 }
 
 // ----------------------
@@ -191,7 +201,7 @@ function computePathStability(i, j) {
 function draw() {
   let gradients = computeGradient(grid);
   let stability = computeStability(grid);
-  let causal = computeCausalMap(grid);
+  let causal = computeCausal(grid);
 
   for (let i = 0; i < SIZE; i++) {
     for (let j = 0; j < SIZE; j++) {
@@ -203,24 +213,32 @@ function draw() {
       let trace = computeTrace(i, j);
       let pathStab = computePathStability(i, j);
 
-      // Base color channels
+      let stage = computeLifecycle(val, grad, stab, trace);
+
       let r = val * 255;
       let g = grad * 255;
       let b = stab * 255;
 
-      // Pressure heat (red boost)
+      // pressure heat
       r += cause * 120;
 
-      // Trace paths (white glow)
+      // trace glow
       let traceBoost = trace * 150;
       r += traceBoost;
       g += traceBoost;
       b += traceBoost;
 
-      // Path stability (blue reinforcement)
+      // path persistence
       b += pathStab * 120;
 
-      // Clamp
+      // lifecycle tint
+      if (stage === 1) r += 80;        // start = red
+      if (stage === 2) g += 80;        // propagation = green
+      if (stage === 3) b += 80;        // settlement = blue
+      if (stage === 4) {               // persistence = white
+        r += 60; g += 60; b += 60;
+      }
+
       r = Math.min(255, r);
       g = Math.min(255, g);
       b = Math.min(255, b);
